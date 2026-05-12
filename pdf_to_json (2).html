@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>収支PDF → JSON 抽出ツール</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0e0e0e;
+  --surface: #1a1a1a;
+  --surface2: #242424;
+  --border: #2e2e2e;
+  --text: #f0ede8;
+  --muted: #666;
+  --accent: #c8f560;
+  --accent-dim: #9bbf45;
+  --blue: #5b9cf6;
+  --red: #f56060;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'Syne', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+header {
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+header h1 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--accent);
+}
+header span {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+#main {
+  flex: 1;
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* drop zone */
+#drop-zone {
+  border: 1.5px dashed var(--border);
+  border-radius: 10px;
+  padding: 52px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--surface);
+  position: relative;
+  overflow: hidden;
+}
+#drop-zone::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, rgba(200,245,96,0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+#drop-zone:hover, #drop-zone.drag {
+  border-color: var(--accent);
+  background: #1e2214;
+}
+#drop-zone .icon { font-size: 36px; margin-bottom: 12px; opacity: 0.6; }
+#drop-zone .label { font-size: 15px; font-weight: 600; color: var(--text); }
+#drop-zone .sub { font-size: 12px; color: var(--muted); margin-top: 6px; font-family: var(--mono); }
+
+/* file chip */
+#file-bar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+#file-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+#file-bar .fname { font-family: var(--mono); font-size: 13px; flex: 1; color: var(--text); }
+#file-bar label {
+  font-size: 12px; padding: 5px 12px; border-radius: 5px; cursor: pointer;
+  border: 1px solid var(--border); color: var(--muted); font-family: var(--mono);
+  transition: all 0.15s;
+}
+#file-bar label:hover { border-color: var(--accent); color: var(--accent); }
+
+/* button */
+#btn-extract {
+  padding: 12px 28px;
+  background: var(--accent);
+  color: #0e0e0e;
+  border: none;
+  border-radius: 6px;
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: -0.01em;
+  display: none;
+}
+#btn-extract:hover { background: var(--accent-dim); }
+#btn-extract:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* status */
+#status {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 18px;
+}
+#status.running { color: var(--blue); }
+#status.done { color: var(--accent); }
+#status.err { color: var(--red); }
+
+/* result */
+#result-wrap { display: none; flex-direction: column; gap: 10px; }
+#result-header {
+  display: flex; align-items: center; gap: 12px;
+}
+#result-header .label {
+  font-family: var(--mono); font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; flex: 1;
+}
+#count {
+  font-family: var(--mono); font-size: 12px;
+  padding: 3px 10px; border-radius: 20px;
+  background: #1e2214; color: var(--accent);
+  border: 1px solid rgba(200,245,96,0.3);
+}
+#json-out {
+  width: 100%;
+  min-height: 320px;
+  max-height: 480px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  resize: vertical;
+  outline: none;
+  background: var(--surface);
+  color: #a8d8a8;
+  transition: border-color 0.15s;
+}
+#json-out:focus { border-color: var(--accent); }
+.btn-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn-row button {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 18px;
+  border-radius: 5px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  transition: all 0.15s;
+}
+.btn-row button:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); }
+.btn-row button.dl {
+  background: var(--accent); color: #0e0e0e; border-color: var(--accent);
+}
+.btn-row button.dl:hover { background: var(--accent-dim); border-color: var(--accent-dim); color: #0e0e0e; }
+#copy-msg { font-family: var(--mono); font-size: 11px; color: var(--accent); display: none; }
+
+/* API key input */
+#apikey-row {
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #1a1408;
+  border: 1px solid #3d3000;
+  border-radius: 7px;
+  font-size: 12px;
+}
+#apikey-row label { font-family: var(--mono); color: #b8a060; font-size: 11px; white-space: nowrap; }
+#apikey-input {
+  flex: 1; background: transparent; border: none; outline: none;
+  font-family: var(--mono); font-size: 12px; color: var(--text);
+}
+#apikey-row .note { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>収支PDF → JSON</h1>
+  <span>TRANSACTION EXTRACTOR — POWERED BY CLAUDE</span>
+</header>
+
+<div id="main">
+
+  <!-- APIキー入力（ローカル実行時のみ表示） -->
+  <div id="apikey-row">
+    <label>ANTHROPIC API KEY</label>
+    <input type="password" id="apikey-input" placeholder="sk-ant-..." autocomplete="off">
+    <span class="note">※ブラウザのメモリのみ。送信・保存なし</span>
+  </div>
+
+  <!-- ドロップゾーン -->
+  <div id="drop-zone">
+    <div class="icon">⬆</div>
+    <div class="label">クリックまたはドラッグでPDFをアップロード</div>
+    <div class="sub">AppFolio / MyRentSource / Reedy & Company 等 各種フォーマット対応</div>
+    <input type="file" id="fi" accept=".pdf" style="display:none">
+  </div>
+
+  <!-- ファイル情報バー -->
+  <div id="file-bar">
+    <div class="dot"></div>
+    <span class="fname" id="fname"></span>
+    <label>↺ 別ファイルを選択<input type="file" id="fi2" accept=".pdf" style="display:none"></label>
+  </div>
+
+  <button id="btn-extract" onclick="extract()">⚡ 取引をJSONで抽出</button>
+
+  <div id="status"></div>
+
+  <!-- 結果 -->
+  <div id="result-wrap">
+    <div id="result-header">
+      <span class="label">抽出結果 — JSON</span>
+      <span id="count"></span>
+    </div>
+    <textarea id="json-out" readonly></textarea>
+    <div class="btn-row">
+      <button onclick="copyJSON()">⎘ コピー</button>
+      <button class="dl" onclick="downloadJSON()">⬇ JSONファイルをダウンロード</button>
+      <span id="copy-msg">✓ コピーしました</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+var pdfBase64 = '', pdfName = '', resultJSON = '';
+
+function ss(t, cls) {
+  var el = document.getElementById('status');
+  el.textContent = t;
+  el.className = cls || '';
+}
+
+// ローカル（file://）実行かどうかを判定してAPIキー入力欄を表示
+if (location.protocol === 'file:' || location.hostname === 'localhost') {
+  document.getElementById('apikey-row').style.display = 'flex';
+}
+
+// ドロップ設定
+var dz = document.getElementById('drop-zone');
+dz.addEventListener('click', function() { document.getElementById('fi').click(); });
+dz.addEventListener('dragover', function(e) { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', function() { dz.classList.remove('drag'); });
+dz.addEventListener('drop', function(e) {
+  e.preventDefault(); dz.classList.remove('drag');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+document.getElementById('fi').addEventListener('change', function(e) { if(e.target.files[0]) loadFile(e.target.files[0]); });
+document.getElementById('fi2').addEventListener('change', function(e) { if(e.target.files[0]) loadFile(e.target.files[0]); });
+
+function loadFile(file) {
+  pdfName = file.name;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var bytes = new Uint8Array(e.target.result), bin = '';
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    pdfBase64 = btoa(bin);
+    dz.style.display = 'none';
+    document.getElementById('file-bar').style.display = 'flex';
+    document.getElementById('fname').textContent = pdfName;
+    document.getElementById('btn-extract').style.display = 'block';
+    document.getElementById('result-wrap').style.display = 'none';
+    resultJSON = '';
+    ss('PDF 読み込み完了 — 「取引をJSONで抽出」を押してください');
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function extract() {
+  if (!pdfBase64) { alert('PDFが読み込まれていません'); return; }
+
+  var apiKey = (document.getElementById('apikey-input').value || '').trim();
+  var headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['x-api-key'] = apiKey;
+
+  var btn = document.getElementById('btn-extract');
+  btn.disabled = true;
+  ss('Claude が解析中...', 'running');
+
+  var sys = 'あなたは海外不動産の収支明細PDFを解析する専門家です。\nPDFから全ての取引をJSON配列のみで返してください。前後にテキスト不要。\n\n形式:\n[\n  {\n    "date": "YYYY-MM-DD",\n    "property": "物件名または住所",\n    "description": "取引内容（日本語簡潔に）",\n    "currency": "USD",\n    "amount": 1234.56,\n    "type": "income または expense"\n  }\n]\n\nルール:\n- amountは常に正の数。typeでincome/expense区別。\n- 残高行・合計行・Required Reserves・Transfer行は除外。\n- Owner Distributionはexpenseとして含める。\n- 月別集計表（Reedy形式等）は各月・各科目を別行展開。\n- 日付不明な場合は期間末日または月末を使用。\n- 通貨はUSDが基本だがPDFに明示があれば従う。';
+
+  fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: headers,
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4000,
+      system: sys,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+          { type: 'text', text: 'このPDFから全取引をJSONのみで返してください。' }
+        ]
+      }]
+    })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    var text = data.content.map(function(c) { return c.text || ''; }).join('');
+    var clean = text.replace(/```json|```/g, '').trim();
+    var parsed;
+    try { parsed = JSON.parse(clean); }
+    catch(e) {
+      var m = clean.match(/\[[\s\S]*\]/);
+      parsed = m ? JSON.parse(m[0]) : [];
+    }
+    resultJSON = JSON.stringify(parsed, null, 2);
+    document.getElementById('json-out').value = resultJSON;
+    document.getElementById('result-wrap').style.display = 'flex';
+    document.getElementById('count').textContent = parsed.length + ' 件';
+    btn.disabled = false;
+    ss('✓ ' + parsed.length + ' 件の取引を抽出しました', 'done');
+  })
+  .catch(function(err) {
+    ss('エラー: ' + err.message, 'err');
+    btn.disabled = false;
+  });
+}
+
+function copyJSON() {
+  navigator.clipboard.writeText(resultJSON).then(showCopy).catch(function() {
+    var ta = document.createElement('textarea');
+    ta.value = resultJSON; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showCopy();
+  });
+}
+function showCopy() {
+  var msg = document.getElementById('copy-msg');
+  msg.style.display = '';
+  setTimeout(function() { msg.style.display = 'none'; }, 2500);
+}
+function downloadJSON() {
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([resultJSON], { type: 'application/json;charset=utf-8' }));
+  a.download = pdfName.replace(/\.pdf$/i, '') + '_transactions.json';
+  a.click();
+}
+</script>
+</body>
+</html>
